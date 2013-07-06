@@ -1,0 +1,60 @@
+real	0m0.123s
+user	0m0.000s
+sys	0m0.060s
+cat | netcat
+
+real	0m0.076s
+user	0m0.000s
+sys	0m0.020s
+writefile
+
+real	0m0.109s
+user	0m0.000s
+sys	0m0.016s
+bytestring_nack 1048576
+
+real	0m0.152s
+user	0m0.004s
+sys	0m0.024s
+bytestring_ack 1048576  
+
+real	0m0.257s
+user	0m0.000s
+sys	0m0.028s
+bytestring_nack 32768
+
+real	0m0.575s
+user	0m0.004s
+sys	0m0.056s
+bytestring_ack 32768
+
+real	0m1.426s
+user	0m0.004s
+sys	0m0.304s
+bytestring_nack 1024
+
+real	0m2.806s
+user	0m0.028s
+sys	0m0.384s
+bytestring_ack 1024
+
+real	0m2.985s
+user	0m0.036s
+sys	0m1.328s
+bytestring_nack 256
+
+real	0m4.186s
+user	0m0.064s
+sys	0m1.304s
+bytestring_ack 256
+
+real	0m26.295s
+user	0m0.456s
+sys	0m14.837s
+bytestring_ack 32
+
+real	0m29.493s
+user	0m0.624s
+sys	0m14.529s
+bytestring_ack 32
+
