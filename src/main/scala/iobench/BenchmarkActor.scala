@@ -5,8 +5,9 @@ import akka.util.ByteString
 import java.io.{File, RandomAccessFile}
 import java.nio.channels.FileChannel
 import akka.io.Tcp._
+import iobench.{WriteFileBenchmarkActor, MappedFileNAckBenchmarkActor, MappedFileAckBenchmarkActor}
 
-sealed abstract class Benchmark extends Actor with ActorLogging {
+sealed abstract class BenchmarkActor extends Actor with ActorLogging {
 
   def printResult(size:Int, dt:Long) {
     val seconds = dt / 1e9
@@ -16,30 +17,42 @@ sealed abstract class Benchmark extends Actor with ActorLogging {
   }
 }
 
-object Benchmark {
+object BenchmarkActor {
   case class SendFile(file:String, target:ActorRef, blockSize:Int)
+
+  val validKind = Seq("bytestring_ack", "bytestring_nack", "writefile")
+
+  def validate(kind:String) {
+    require(validKind.contains(kind.toLowerCase))
+  }
+
+  def makeProps(kind:String):Props = {
+    kind.toLowerCase match {
+      case "bytestring_ack" => Props[MappedFileAckBenchmarkActor]
+      case "bytestring_nack" => Props[MappedFileNAckBenchmarkActor]
+      case "writefile" => Props[WriteFileBenchmarkActor]
+      case _ => ???
+    }
+  }
 }
 
-class WriteFileBenchmark extends Benchmark {
-  import Benchmark._
-  import WriteFileBenchmark._
+class WriteFileBenchmarkActor extends BenchmarkActor {
+  import BenchmarkActor._
+  import WriteFileBenchmarkActor._
 
   def receive = {
-    case SendFile(file, target, blockSize) =>
+    case SendFile(file, connection, blockSize) =>
       val t0 = System.nanoTime()
       val size = new File(file).length().toInt
-      target ! WriteFile(file,0,size,Finished)
+      val command = WriteFile(file,0,size,Finished)
+      connection ! command
       context.become {
         case Finished =>
           printResult(size, System.nanoTime() - t0)
-          target ! Close
+          connection ! Close
         case msg@CommandFailed(cmd) =>
           log.debug(msg.toString)
-        case msg@PeerClosed =>
-          context.stop(self)
-          log.debug(msg.toString)
-        case msg@Closed =>
-          log.debug(msg.toString)
+        case PeerClosed | Closed =>
           context.stop(self)
         case msg =>
           log.debug(msg.toString)
@@ -47,16 +60,16 @@ class WriteFileBenchmark extends Benchmark {
   }
 }
 
-object WriteFileBenchmark {
+object WriteFileBenchmarkActor {
   case object Finished extends Event
 }
 
-class MappedFileAck extends Benchmark {
-  import Benchmark._
-  import MappedFileAck._
+class MappedFileAckBenchmarkActor extends BenchmarkActor {
+  import BenchmarkActor._
+  import MappedFileAckBenchmarkActor._
 
   def receive = {
-    case SendFile(file, target, blockSize) =>
+    case SendFile(file, connection, blockSize) =>
       val channel = new RandomAccessFile(file, "r").getChannel()
       val size = channel.size().toInt
       val buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, size)
@@ -68,7 +81,7 @@ class MappedFileAck extends Benchmark {
         case msg@Ack(x) =>
           if(x==size) {
             printResult(size, System.nanoTime() - t0)
-            target ! Close
+            connection ! Close
           } else {
             offset = x
             val min = offset
@@ -76,7 +89,7 @@ class MappedFileAck extends Benchmark {
             val slice = buffer.slice()
             slice.position(min)
             slice.limit(max)
-            target ! Write(ByteString.fromByteBuffer(slice), Ack(max))
+            connection ! Write(ByteString.fromByteBuffer(slice), Ack(max))
           }
         case msg@CommandFailed(cmd) =>
           log.debug(msg.toString)
@@ -92,16 +105,16 @@ class MappedFileAck extends Benchmark {
   }
 }
 
-object MappedFileAck {
+object MappedFileAckBenchmarkActor {
   case class Ack(offset:Int) extends Event
 }
 
-class MappedFileNAck extends Benchmark {
-  import Benchmark._
-  import MappedFileNAck._
+class MappedFileNAckBenchmarkActor extends BenchmarkActor {
+  import BenchmarkActor._
+  import MappedFileNAckBenchmarkActor._
 
   def receive = {
-    case SendFile(file, target, blockSize) =>
+    case SendFile(file, connection, blockSize) =>
       val channel = new RandomAccessFile(file, "r").getChannel()
       val size = channel.size().toInt
       val buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, size)
@@ -118,7 +131,7 @@ class MappedFileNAck extends Benchmark {
             val slice = buffer.slice()
             slice.position(ack.min)
             slice.limit(ack.max)
-            target ! Write(ByteString.fromByteBuffer(slice), ack)
+            connection ! Write(ByteString.fromByteBuffer(slice), ack)
             offset = ack.max
             if(ackCount == 0)
               self ! SendNext
@@ -129,7 +142,7 @@ class MappedFileNAck extends Benchmark {
           if(max==size) {
             // we are finished
             printResult(size, System.nanoTime() - t0)
-            target ! Close
+            connection ! Close
           } else if(msg.batch==batch && ackCount>0) {
             // we are in ack mode, so decrease ack count and trigger a send
             // however, only do this if the ack is for the right batch!
@@ -143,8 +156,10 @@ class MappedFileNAck extends Benchmark {
             offset = fail.min
             // increase the batch so we ignore subsequent failures of this batch
             batch += 1
+            // enter ack mode for 10 messages
+            ackCount = 10
             // send ResumeWriting to the connection
-            target ! ResumeWriting
+            connection ! ResumeWriting
           }
         case msg@WritingResumed =>
           // trigger send of the next block
@@ -161,7 +176,7 @@ class MappedFileNAck extends Benchmark {
   }
 }
 
-object MappedFileNAck {
+object MappedFileNAckBenchmarkActor {
   case object SendNext
   case class Ack(min:Int, max:Int, batch:Int) extends Event
 }

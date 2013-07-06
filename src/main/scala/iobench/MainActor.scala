@@ -15,19 +15,14 @@ class MainActor extends Actor with ActorLogging {
 
   def receive = {
     case MainActor.Benchmark(file, target, blockSize, kind) =>
-      val server =  context.actorOf(kind match {
-        case "bytestring_ack" => Props[MappedFileAck]
-        case "bytestring_nack" => Props[MappedFileNAck]
-        case "writefile" => Props[WriteFileBenchmark]
-        case _ => ???
-      }, "server")
+      val server =  context.actorOf(BenchmarkActor.makeProps(kind), "server")
       manager ! Connect(target)
       context.become {
         case Connected(remote, local) =>
           val connection = sender
           connection ! Tcp.Register(server)
           context.watch(server)
-          server ! Benchmark.SendFile(file, connection, blockSize)
+          server ! BenchmarkActor.SendFile(file, connection, blockSize)
         case msg@CommandFailed(cmd) =>
           log.debug(msg.toString)
           println("Could not connect to " + target)
@@ -44,7 +39,6 @@ object MainActor {
 }
 
 object Main extends App {
-  val validKind = Seq("bytestring_ack", "bytestring_nack", "writefile")
   try {
     require(args.length == 5)
     val file = args(0)
@@ -53,7 +47,7 @@ object Main extends App {
     val target = new InetSocketAddress(host, port)
     val blockSize = args(3).toInt
     val kind = args(4).toLowerCase
-    require(validKind.contains(kind))
+    BenchmarkActor.validate(kind)
 
     val system = ActorSystem("iobench")
     val actor = system.actorOf(Props[MainActor], "main")
@@ -61,6 +55,6 @@ object Main extends App {
   } catch {
     case NonFatal(e) =>
       println("Usage java -jar iobench.jar <file> <host> <port> <blockSize> <kind>")
-      println("kind = " + validKind.mkString("{", ",", "}"))
+      println("kind = " + BenchmarkActor.validKind.mkString("{", ",", "}"))
   }
 }
