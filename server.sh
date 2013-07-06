@@ -1,2 +1,2 @@
 #!/bin/bash
-nohup netcat -d -l -n -p 2222 > test.stored &
+tcpserver 127.0.0.1 2222 ./server2.sh
