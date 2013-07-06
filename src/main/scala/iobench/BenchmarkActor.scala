@@ -5,7 +5,6 @@ import akka.util.ByteString
 import java.io.{File, RandomAccessFile}
 import java.nio.channels.FileChannel
 import akka.io.Tcp._
-import iobench.{WriteFileBenchmarkActor, MappedFileNAckBenchmarkActor, MappedFileAckBenchmarkActor}
 
 sealed abstract class BenchmarkActor extends Actor with ActorLogging {
 
