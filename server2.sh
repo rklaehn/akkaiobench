@@ -1,2 +1,2 @@
 #!/bin/bash
-time cat > /dev/null
+/usr/bin/time -f "%e" cat > /dev/null
