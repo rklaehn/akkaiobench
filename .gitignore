@@ -16,3 +16,7 @@ project/plugins/project/
 test
 test.stored
 *~
+
+# IDEA
+.idea
+.idea_modules
