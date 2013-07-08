@@ -10,16 +10,16 @@ sealed abstract class BenchmarkActor extends Actor with ActorLogging {
 
   def printResult(size:Int, dt:Long) {
     val seconds = dt / 1e9
-    println(getClass.getSimpleName)
-    println(s"Transferred $size bytes in $seconds seconds.")
-    println(s"Transfer rate ${size/(seconds*1024*1024)} MBytes/s")
+//    println(getClass.getSimpleName)
+//    println(s"Transferred $size bytes in $seconds seconds.")
+//    println(s"Transfer rate ${size/(seconds*1024*1024)} MBytes/s")
   }
 }
 
 object BenchmarkActor {
   case class SendFile(file:String, target:ActorRef, blockSize:Int)
 
-  val validKind = Seq("bytestring_ack", "bytestring_nack", "writefile")
+  val validKind = Seq("bytestring_ack", "bytestring_nack", "writefile",  "writefile_ack" )
 
   def validate(kind:String) {
     require(validKind.contains(kind.toLowerCase))
@@ -30,6 +30,7 @@ object BenchmarkActor {
       case "bytestring_ack" => Props[MappedFileAckBenchmarkActor]
       case "bytestring_nack" => Props[MappedFileNAckBenchmarkActor]
       case "writefile" => Props[WriteFileBenchmarkActor]
+      case "writefile_ack" => Props[WriteFileAckBenchmarkActor]
       case _ => ???
     }
   }
@@ -63,6 +64,53 @@ object WriteFileBenchmarkActor {
   case object Finished extends Event
 }
 
+class WriteFileAckBenchmarkActor extends BenchmarkActor {
+  import BenchmarkActor._
+  import MappedFileAckBenchmarkActor._
+
+  def receive = {
+    case SendFile(file, connection, blockSize) =>
+      val size = new File(file).length.toInt
+      val t0 = System.nanoTime()
+      var offset = 0
+      self ! SendBlockAt(0)
+      context.become {
+        case msg@SendBlockAt(x) =>
+          if(x==size) {
+            printResult(size, System.nanoTime() - t0)
+            connection ! Close
+          } else {
+            offset = x
+            val min = offset
+            val max = (offset + blockSize) min size
+            println(s"Sending data from $min to $max")
+            connection ! WriteFile(file, min, max-min, SendBlockAt(max))
+          }
+        case msg@CommandFailed(cmd) =>
+          println(s"Got CommandFailed $cmd. Sending ResumeWriting to connection!")
+          System.gc()
+          connection ! ResumeWriting
+          log.debug(msg.toString)
+        case msg@WritingResumed =>
+          println(s"Got WritingResumed. Re-sending block at $offset!")
+          // trigger send of the next block
+          self ! SendBlockAt(offset)
+        case msg@PeerClosed =>
+          context.stop(self)
+          log.debug(msg.toString)
+        case msg@Closed =>
+          log.debug(msg.toString)
+          context.stop(self)
+        case msg =>
+          log.debug(msg.toString)
+      }
+  }
+}
+
+object WriteFileAckBenchmarkActor {
+  case class Ack(offset:Int) extends Event
+}
+
 class MappedFileAckBenchmarkActor extends BenchmarkActor {
   import BenchmarkActor._
   import MappedFileAckBenchmarkActor._
@@ -75,9 +123,9 @@ class MappedFileAckBenchmarkActor extends BenchmarkActor {
       channel.close()
       val t0 = System.nanoTime()
       var offset = 0
-      self ! Ack(0)
+      self ! SendBlockAt(0)
       context.become {
-        case msg@Ack(x) =>
+        case msg@SendBlockAt(x) =>
           if(x==size) {
             printResult(size, System.nanoTime() - t0)
             connection ! Close
@@ -88,7 +136,7 @@ class MappedFileAckBenchmarkActor extends BenchmarkActor {
             val slice = buffer.slice()
             slice.position(min)
             slice.limit(max)
-            connection ! Write(ByteString.fromByteBuffer(slice), Ack(max))
+            connection ! Write(ByteString.fromByteBuffer(slice), SendBlockAt(max))
           }
         case msg@CommandFailed(cmd) =>
           log.debug(msg.toString)
@@ -105,7 +153,7 @@ class MappedFileAckBenchmarkActor extends BenchmarkActor {
 }
 
 object MappedFileAckBenchmarkActor {
-  case class Ack(offset:Int) extends Event
+  case class SendBlockAt(offset:Int) extends Event
 }
 
 class MappedFileNAckBenchmarkActor extends BenchmarkActor {

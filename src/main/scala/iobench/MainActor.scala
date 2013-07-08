@@ -15,21 +15,28 @@ class MainActor extends Actor with ActorLogging {
 
   def receive = {
     case MainActor.Benchmark(file, target, blockSize, kind) =>
-      val server =  context.actorOf(BenchmarkActor.makeProps(kind), "server")
+      var size = blockSize
       manager ! Connect(target)
       context.become {
         case Connected(remote, local) =>
           val connection = sender
+          val server =  context.actorOf(BenchmarkActor.makeProps(kind), "server")
           connection ! Tcp.Register(server)
           context.watch(server)
-          server ! BenchmarkActor.SendFile(file, connection, blockSize)
+          println(s"$kind\t$size")
+          server ! BenchmarkActor.SendFile(file, connection, size)
         case msg@CommandFailed(cmd) =>
           log.debug(msg.toString)
           println("Could not connect to " + target)
           system.shutdown()
-        case msg@Terminated(`server`) =>
+        case msg@Terminated(_) =>
           log.debug(msg.toString)
-          system.shutdown()
+          if(size<=32)
+            system.shutdown()
+          else {
+            size /= 2
+            manager ! Connect(target)
+          }
       }
   }
 }
